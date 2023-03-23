@@ -110,6 +110,10 @@ def load_dsdl(*paths, **args):
     If the exclude_dist argument is not present, or False, the DSDL
     definitions installed with this package will be loaded first.
 
+    If exclude_dist is a tuple of definitions to exclude, then those
+    are not loaded. Possible values are: uavcan, dronecan, ardupilot,
+    com and cuav.
+
     Also adds entries for all datatype (ID, kind)s to the DATATYPES
     dictionary, which maps datatype (ID, kind)s to their respective type
     classes.
@@ -119,37 +123,34 @@ def load_dsdl(*paths, **args):
     paths = list(paths)
 
     # Try to prepend the built-in DSDL files
-    # TODO: why do we need try/except here?
     # noinspection PyBroadException
-    try:
-        if not args.get("exclude_dist", None):
-            dsdl_path = pkg_resources.resource_filename(__name__, "dsdl_specs")  # @UndefinedVariable
-            # check if we are a package, if not directly use relative DSDL path
-            if not os.path.exists(dsdl_path):
-                DSDL_paths = [ "../../DSDL", "../../../../../DroneCAN/DSDL", "../../../../dsdl"]
-                for p in DSDL_paths:
-                    dpath = os.path.join(os.path.dirname(__file__), p)
-                    if os.path.exists(dpath):
-                        dsdl_path = dpath
-                        logger.debug('Found DSDL at: '.format(dsdl_path))
-                        break
-            if not os.path.exists(dsdl_path):
-                raise UAVCANException('failed to find DSDL path')
-            paths = [os.path.join(dsdl_path, "uavcan"),
-                     os.path.join(dsdl_path, "dronecan"),
-                     os.path.join(dsdl_path, "ardupilot"),
-                     os.path.join(dsdl_path, "com"),
-                     os.path.join(dsdl_path, "cuav")] + paths
+    if args.get("exclude_dist", None) is not None:
+        dsdl_path = pkg_resources.resource_filename(__name__, "dsdl_specs")  # @UndefinedVariable
+        # check if we are a package, if not directly use relative DSDL path
+        if not os.path.exists(dsdl_path):
+            DSDL_paths = ("../../dsdl", "../../DSDL", "../../../../../DroneCAN/DSDL", "../../../../dsdl")
+            for p in DSDL_paths:
+                dpath = os.path.join(os.path.dirname(__file__), p)
+                if os.path.exists(dpath):
+                    dsdl_path = dpath
+                    logger.debug('Found DSDL at: '.format(dsdl_path))
+                    break
+        if not os.path.exists(dsdl_path):
+            logger.warning('DSDL load: failed to find DSDL path')
+        else:
+            # TODO: support generic sequence type instead of tuple
+            if not isinstance(exclude_dist, tuple):
+                exclude_dist = tuple()
+            possible_dirs = ('uavcan', 'dronecan', 'ardupilot', 'com', 'cuav')
+            paths = [os.path.join(dsdl_path, d) for d in possible_dirs if d not in exclude_dist] + paths
             custom_path = os.path.join(os.path.expanduser("~"), "uavcan_vendor_specific_types")
             if os.path.isdir(custom_path):
                 paths += [f for f in [os.path.join(custom_path, f) for f in os.listdir(custom_path)]
-                          if os.path.isdir(f)]
+                            if os.path.isdir(f)]
             custom_path = os.path.join(os.path.expanduser("~"), "dronecan_vendor_specific_types")
             if os.path.isdir(custom_path):
                 paths += [f for f in [os.path.join(custom_path, f) for f in os.listdir(custom_path)]
-                          if os.path.isdir(f)]
-    except Exception as e:
-        logger.warning('DSDL load exception: {}'.format(e))
+                            if os.path.isdir(f)]
 
     root_namespace = Namespace()
     dtypes = dsdl.parse_namespaces(paths)
@@ -181,7 +182,7 @@ def load_dsdl(*paths, **args):
             dtype.Request = create_instance_closure(dtype, _mode='request')
             dtype.Response = create_instance_closure(dtype, _mode='response')
 
-    toplevel = ['dronecan', 'uavcan', 'ardupilot', 'com', 'cuav']
+    toplevel = ('dronecan', 'uavcan', 'ardupilot', 'com', 'cuav')
     for n in toplevel:
         namespace = root_namespace._path(n)
         MODULE.__dict__[n] = Namespace()
@@ -204,11 +205,6 @@ MODULE.__dict__ = globals()
 MODULE._module = sys.modules[MODULE.__name__]
 MODULE._pmodule = MODULE
 sys.modules[MODULE.__name__] = MODULE
-
-
-# Completing package initialization with loading default DSDL definitions
-load_dsdl()
-
 
 # Importing modules that may be dependent on the standard DSDL types
 import dronecan.app as app
